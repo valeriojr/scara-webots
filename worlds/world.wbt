@@ -1,0 +1,161 @@
+#VRML_SIM R2022a utf8
+WorldInfo {
+}
+Viewpoint {
+  orientation -0.2759201420825381 0.08641840051625037 0.9572878016800198 2.559003346344559
+  position 1.30226886986186 -0.8018030324818536 0.9706280811835599
+  follow "rubber duck"
+  followType "None"
+}
+Robot {
+  translation 0 -0.51 0.15
+  children [
+    HingeJoint {
+      jointParameters HingeJointParameters {
+        axis 0 0 1
+      }
+      device [
+        RotationalMotor {
+          name "joint1_motor"
+        }
+        PositionSensor {
+          name "joint1_sensor"
+        }
+      ]
+      endPoint Solid {
+        translation 3.534594014738874e-07 0.23749999999973695 0
+        rotation 0 0 -1 1.4883269058685375e-06
+        children [
+          Shape {
+            appearance Appearance {
+              material Material {
+              }
+            }
+            geometry Box {
+              size 0.1 0.475 0.1
+            }
+          }
+          HingeJoint {
+            jointParameters HingeJointParameters {
+              axis 0 0 1
+              anchor 0 0.2375 0
+            }
+            device [
+              RotationalMotor {
+                name "joint2_motor"
+              }
+              PositionSensor {
+                name "joint2_sensor"
+              }
+            ]
+            endPoint Solid {
+              translation 0 0.4375 0.1
+              children [
+                SliderJoint {
+                  jointParameters JointParameters {
+                    axis 0 0 -1
+                    maxStop 0.1
+                  }
+                  device [
+                    PositionSensor {
+                      name "joint3_sensor"
+                    }
+                    LinearMotor {
+                      name "joint3_motor"
+                    }
+                  ]
+                  endPoint Solid {
+                    translation 0 0.2 0.04
+                    children [
+                      HingeJoint {
+                        jointParameters HingeJointParameters {
+                          axis 0 0 -1
+                        }
+                        device [
+                          RotationalMotor {
+                            name "joint4_motor"
+                          }
+                          PositionSensor {
+                            name "joint4_sensor"
+                          }
+                        ]
+                        endPoint Solid {
+                          translation 0 0 -0.11
+                          rotation 0 0 -1 0
+                          children [
+                            GPS {
+                              name "end_effector_gps"
+                              type "laser"
+                              accuracy 1
+                            }
+                            Shape {
+                              appearance Appearance {
+                                material Material {
+                                }
+                              }
+                              geometry Box {
+                                size 0.05 0.05 0.01
+                              }
+                            }
+                          ]
+                          name "SuctionPad"
+                          boundingObject Box {
+                            size 0.05 0.05 0.01
+                          }
+                        }
+                      }
+                      Shape {
+                        appearance Appearance {
+                          material Material {
+                          }
+                        }
+                        geometry Box {
+                          size 0.01 0.01 0.2
+                        }
+                      }
+                    ]
+                    boundingObject Box {
+                      size 0.01 0.01 0.2
+                    }
+                  }
+                }
+                Shape {
+                  appearance Appearance {
+                    material Material {
+                    }
+                  }
+                  geometry Box {
+                    size 0.1 0.4 0.1
+                  }
+                }
+              ]
+              name "L2"
+              boundingObject Box {
+                size 0.1 0.4 0.1
+              }
+            }
+          }
+        ]
+        name "L1"
+        boundingObject Box {
+          size 0.1 0.475 0.1
+        }
+        physics Physics {
+        }
+      }
+    }
+  ]
+  name "SCARA"
+  controller "SCARA"
+  supervisor TRUE
+}
+DEF rubber_duck RubberDuck {
+  translation 0.25 0 0.19
+}
+TexturedBackground {
+  texture "factory"
+}
+TexturedBackgroundLight {
+}
+RectangleArena {
+}
