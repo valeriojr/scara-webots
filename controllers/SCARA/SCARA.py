@@ -1,119 +1,116 @@
-from functools import reduce
+import math
 
 import numpy
-from numpy.linalg import pinv
-from numpy.linalg import norm
 
-from controller import Supervisor
+import controller
 
-
-L_1 = 0.475
-L_2 = 0.4
-OFFSET = 0.1
-c = lambda theta: numpy.cos(theta)
-s = lambda theta: numpy.sin(theta)
-pi = numpy.pi
-pi_2 = 0.5 * numpy.pi
-alpha = 0.01
-tol = 0.01
+offset = 0.1
+l1 = 0.475
+l2 = 0.4
+tol = 0.1
+dh = numpy.array([
+    [None, 0, 0, l1],
+    [None, 0, 0, l2],
+    [0.5 * numpy.pi, None, 0, 0],
+    [None, 0, numpy.pi, 0]
+])
 
 
-def dh(theta_1, theta_2, theta_3, d_4): 
-    return numpy.array([
-        [       theta_1,   OFFSET,  0, L_1],
-        [       theta_2,        0,  0, L_2],
-        [pi_2 + theta_3,        0, pi,   0],
-        [          pi_2,      d_4,  0,   0],
-    ])
+def rot2eul(R):
+    beta = -numpy.arcsin(R[2, 0])
+    alpha = numpy.arctan2(R[2, 1] / numpy.cos(beta), R[2, 2] / numpy.cos(beta))
+    gamma = numpy.arctan2(R[1, 0] / numpy.cos(beta), R[0, 0] / numpy.cos(beta))
+    return numpy.array((alpha, beta, gamma))
 
 
-def T(theta, d, alpha, a): 
-    return numpy.array([
-        [           c(theta),           -s(theta),         0,             a],
-        [s(theta) * c(alpha), c(theta) * c(alpha), -s(alpha), -s(alpha) * d],
-        [s(theta) * s(alpha), c(theta) * s(alpha),  c(alpha),  c(alpha) * d],
-        [                  0,                   0,         0,             1],
-    ])
+def get_transform_matrix(M):
+    return numpy.reshape(M, (4, 4))
 
 
-def fkine(n, *args):
-    return reduce(numpy.matmul, [T(*p) for p in dh(*args)[:n]])
+def decompose(T):
+    return T[:3, :3], T[:3, 3]
 
 
-def jacobian(q):
-    """
-    s1, s2, _, s3 = numpy.sin(q)
-    c1, c2, _, c3 = numpy.cos(q)
-    return numpy.array([
-        [-L1*s1 - L2*s1*s2, -L2*s1*s2,  0,  0],
-        [ L1*c1 + L2*c1*c2,  L2*c1*c2,  0,  0],
-        [                0,         0, -1,  0],
-        [                0,         0,  0,  0],
-        [                0,         0,  0,  0],
-        [                1,         1,  0, -1],
-    ])
-    """
-    z0 = numpy.array([0, 0, 1]).reshape((3, 1))
-    
-    pi = [fkine(i, *q)[:-1, 3].reshape((3, 1)) for i in range(1, 5)]
-    pe = fkine(None, *q)[:-1, 3].reshape((3, 1))
-    
-    jpi = [numpy.cross(numpy.array([0, 0, 1]), (p - pe).ravel()).reshape((3, 1)) for p in pi]
-     
-    return numpy.hstack([
-        numpy.vstack([jpi[0], z0]),
-        numpy.vstack([jpi[1], z0]),
-        numpy.array([[0, 0, -1, 0, 0, 0]]).T,
-        numpy.vstack([jpi[3], z0]),  
-    ])
+def get_joint_transform_matrix(q, n, dh, joint_types):
+    T = numpy.eye(4)
+    for i in range(n):
+        theta, d, alpha, a = dh[i]
+        cos_theta = numpy.cos(theta)
+        sin_theta = numpy.sin(theta)
+        cos_alpha = numpy.cos(alpha)
+        sin_alpha = numpy.cos(alpha)
+        T = numpy.array([
+            [cos_theta, -sin_theta * cos_alpha, sin_theta * sin_alpha, a * cos_theta],
+            [sin_theta, cos_theta * cos_alpha, -cos_theta * sin_alpha, a * sin_theta],
+            [0, sin_alpha, cos_alpha, d],
+            [0, 0, 0, 1],
+        ])
+
+    return T
 
 
-robot = Supervisor()
-timestep = int(robot.getBasicTimeStep())
+def jacobian(q, joint_types, pe):
+    J = numpy.zeros((6, len(q)))
 
-deviceNames = []
-for i in range(robot.getNumberOfDevices()):
-    deviceNames.append(robot.getDeviceByIndex(i).getName())
+    for i, joint_type in enumerate(joint_types):
+        M = get_joint_transform_matrix(q, i, dh, joint_types)
+        R, T = decompose(M)
+        Zi = R @ numpy.array([[0, 0, 1]]).T
 
-numberOfScrews = 0
-motors = []
-sensors = []
-end_effector_gps = robot.getDevice('end_effector_gps')
-end_effector_gps.enable(timestep)
-rubber_duck = robot.getFromDef('rubber_duck')
+        Jp, Jo = numpy.zeros(3), numpy.zeros(3)
+        if joint_type == 'p':
+            Jp = Zi
+            Jo = numpy.zeros((3, 1))
+        elif joint_type == 'r':
+            Jp = numpy.cross(Zi.T, pe - T).reshape((3, 1))
+            Jo = Zi
 
-for i in range(1, robot.getNumberOfDevices()):
-    linearMotorName = f'joint{i}_motor'
-    positionSensorName = f'joint{i}_sensor'
-    if linearMotorName in deviceNames and positionSensorName in deviceNames:
-        motors.append(robot.getDevice(linearMotorName))
-        sensors.append(robot.getDevice(positionSensorName))
-    else:
-        break
+        J[:, i] = numpy.vstack([Jp, Jo]).flatten()
 
+    return J
+
+
+sim = controller.Supervisor()
+timestep = int(sim.getBasicTimeStep())
+goal = sim.getFromDef('rubber_duck')
+effector = sim.getFromDef('suction_pad')
+motors = [sim.getDevice(f'joint{i}_motor') for i in range(1, 5)]
+sensors = [motor.getPositionSensor() for motor in motors]
 for sensor in sensors:
     sensor.enable(timestep)
 
-distance = 1000.0
-while robot.step(timestep) != -1 and distance > tol:
-    q = numpy.array([sensor.getValue() for sensor in sensors])
-    J = jacobian(q)
-    J_cross = pinv(J)
-    
-    s1, s2, _, s3 = numpy.sin(q)
-    c1, c2, _, c3 = numpy.cos(q)
-    d = q[2]
-    e_pos = fkine(None, *q) @ numpy.array([[0], [0], [1], [1]])
-    e_ori = numpy.array([[0], [0], [q[3]]])
-    current_e = numpy.array([*e_pos[:-1], *e_ori]).T
-    rubber_duck_position = rubber_duck.getField('translation').getSFVec3f()
-    goal_e = numpy.array([[*rubber_duck_position, 0, 0, 0]])
-    delta_e = goal_e - current_e
-    delta_q = J_cross @ delta_e.T 
-    for i in range(len(q)):
-        q[i] += alpha * delta_q[i]
-    q[2] = 0
-    for motor, position in zip(motors, q):
-        motor.setPosition(position)
+q = numpy.array([sensor.getValue() for sensor in sensors])
+min_q = numpy.array([motor.getMinPosition() for motor in motors])
+max_q = numpy.array([motor.getMaxPosition() for motor in motors])
 
-    distance = norm(delta_e)
+effector_rotation_matrix, effector_translation = decompose(get_transform_matrix(effector.getPose()))
+effector_pose = numpy.hstack([effector_translation.reshape(1, 3), rot2eul(effector_rotation_matrix).reshape(1, 3)])
+goal_rotation_matrix, goal_translation = decompose(get_transform_matrix(goal.getPose()))
+goal_pose = numpy.hstack([goal_translation.reshape(1, 3), rot2eul(goal_rotation_matrix).reshape(1, 3)])
+distance = numpy.linalg.norm(goal_pose - effector_pose)
+
+while distance > tol and sim.step(timestep) != -1:
+    dh[0][0] = q[0]
+    dh[1][0] = q[1]
+    dh[2][1] = q[2]
+    dh[3][0] = q[3] + numpy.pi
+
+    J = jacobian(q, 'rrpr', effector_translation.flatten())
+    q_dot = numpy.linalg.pinv(J) @ (goal_pose - effector_pose).T
+    q += q_dot.flatten() * timestep / 1000
+
+    for i, motor in enumerate(motors):
+        if (min_q[i] != 0 and max_q[i] != 0):
+            q[i] = min(max(q[i], min_q[i]), max_q[i])
+        motor.setPosition(q[i])
+
+    q = numpy.array([sensor.getValue() for sensor in sensors])
+
+    # if sim.step(timestep) == -1:
+    #     break
+
+    effector_rotation_matrix, effector_translation = decompose(get_transform_matrix(effector.getPose()))
+    effector_pose = numpy.hstack([effector_translation.reshape(1, 3), rot2eul(effector_rotation_matrix).reshape(1, 3)])
+    goal_rotation_matrix, goal_translation = decompose(get_transform_matrix(goal.getPose()))
+    goal_pose = numpy.hstack([goal_translation.reshape(1, 3), rot2eul(goal_rotation_matrix).reshape(1, 3)])
+    distance = numpy.linalg.norm(goal_pose - effector_pose)
